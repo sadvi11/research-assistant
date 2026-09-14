@@ -1,0 +1,19 @@
+# Core
+anthropic>=1.0.0
+pydantic>=2.9.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# Embeddings (local, no API cost). Set RA_EMBEDDER=hash to skip this entirely.
+sentence-transformers>=3.0.0
+
+# Vector store
+psycopg[binary]>=3.2.0
+
+# Document parsing (optional per format; ingestion degrades with a clear error)
+pypdf>=5.0.0
+python-docx>=1.1.0
+
+# Development
+pytest>=8.0.0
+httpx>=0.27.0
