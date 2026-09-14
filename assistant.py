@@ -25,6 +25,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
+from citations.conflicts import ConflictDetector, conflict_notes
 from citations.validator import CitationValidator
 from citations.verifier import ClaimVerifier, VerificationReport
 from config.settings import Settings, get_settings
@@ -81,12 +82,14 @@ class ResearchAssistant:
         settings: Settings | None = None,
         validator: CitationValidator | None = None,
         verifier: ClaimVerifier | None = None,
+        conflict_detector: ConflictDetector | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.retriever = retriever
         self.client = client
         self.validator = validator or CitationValidator()
         self.verifier = verifier or ClaimVerifier(client, settings=self.settings)
+        self.conflicts = conflict_detector or ConflictDetector(client, settings=self.settings)
 
     # -- public ------------------------------------------------------------
 
@@ -196,6 +199,10 @@ class ResearchAssistant:
                 subquestions=subquestions, claims=verification.claims,
             )
 
+        # Conflicts are additive: a failure here degrades the answer's richness,
+        # never its correctness, so it must not block the response.
+        detected = self.conflicts.detect(question, chunks)
+        notes.extend(conflict_notes(detected))
         notes.extend(self._uncertainty_notes(validation.valid, chunks, verification))
 
         return ResearchAnswer(
@@ -204,6 +211,7 @@ class ResearchAssistant:
             answer=generated.text,
             citations=validation.valid,
             claims=verification.claims,
+            conflicts=detected,
             evidence=evidence,
             subquestions=subquestions,
             uncertainty_notes=[n for n in notes if n],

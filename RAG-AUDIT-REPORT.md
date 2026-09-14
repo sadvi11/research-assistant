@@ -44,7 +44,7 @@ finding above is recorded as it was found.**
 | 2 | 🔴 `min_relevance_score` filtered normalised scores | ✅ **Fixed** — absolute floor before normalisation, relative lexical escape |
 | 3 | 🟠 pgvector had no similarity floor (store divergence) | ✅ **Fixed** — floor added; parity test asserts both stores agree |
 | 4 | 🟠 `PgVectorStore` had zero test coverage | ✅ **Fixed** — 9 integration tests |
-| 5 | 🟠 `conflicts` never populated | ⚠️ **Open** — documented in README Known Limitations |
+| 5 | 🟠 `conflicts` never populated | ✅ **Fixed** — `citations/conflicts.py`, 11 tests |
 | 6 | 🟡 Unexpected exceptions crashed `answer()` | ✅ **Fixed** — orchestrator catches broadly, returns `ERROR` |
 | 7 | 🟡 Prompt injection unverified against a real model | ⚠️ **Open** — needs an API key |
 | 8 | 🟡 Document-block `context` key unverified | ⚠️ **Open** — needs an API key |
@@ -67,15 +67,33 @@ appearance of corroboration.
 
 | | Before | After |
 |---|---|---|
-| Tests | 116 | **123** (+9 pgvector integration) |
+| Tests | 116 | **134** (+9 pgvector integration) |
 | Tier-4-only answer | Released, no caveat | **Withheld** |
 | Lowest absolute relevance reaching the model | 0.144 | **0.615** (weak hit dropped) |
 | `E4021` exact-identifier retrieval | Works | **Still works** (escape hatch preserved) |
 | pgvector coverage | 0 tests | 9 tests |
 
-**Revised score: 78 → 86 / 100.** The verdict is unchanged at **STRONG AI
-ENGINEERING PROJECT**; INTERVIEW READY still requires findings 5, 7 and 8, which
-need an API key and a design decision about conflict detection.
+### Conflict detection — the design decision
+
+The model is asked only to spot a **semantic contradiction** between passages.
+It is never asked which source deserves more weight: **authority is derived in
+code from the trust tier**, because a model's opinion about which domain is more
+authoritative is exactly the judgement this system refuses to delegate. Equal
+tiers name no winner rather than inventing a hierarchy.
+
+One call per query, not one per source pair — pairwise would be O(n²).
+
+⚠️ **A tradeoff the implementation exposed:** detection can only compare sources
+that survived retrieval. A dissenting source scoring below the relevance floor
+is filtered out before detection runs. Widening the candidate set for detection
+alone was considered and rejected — surfacing a conflict against evidence too
+weak to have been used in the answer would mislead more than it informs. This is
+documented in the README rather than hidden.
+
+**Revised score: 78 → 90 / 100.** The verdict is unchanged at **STRONG AI
+ENGINEERING PROJECT**. INTERVIEW READY still requires findings 7 and 8, both of
+which need an API key: nothing in this project has ever been verified against a
+real model.
 
 ---
 

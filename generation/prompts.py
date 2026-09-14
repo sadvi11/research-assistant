@@ -141,3 +141,27 @@ that do not appear in the evidence), it is NOT supported.
 <evidence>
 {evidence}
 </evidence>"""
+
+
+CONFLICT_DETECTION_PROMPT = """Identify places where these sources CONTRADICT each other.
+
+A contradiction means two sources make claims that cannot both be true about the
+same thing - opposing recommendations, incompatible facts, different values for
+the same quantity.
+
+These are NOT contradictions:
+- One source covering a topic the other simply does not mention
+- Different levels of detail about the same fact
+- Different wording for the same substantive claim
+- Sources addressing genuinely different situations or scopes
+
+Do not judge which source is more trustworthy. Report only what each says.
+If the sources do not contradict each other, return an empty list.
+
+<question>
+{question}
+</question>
+
+<sources>
+{sources}
+</sources>"""

@@ -23,6 +23,7 @@ from generation.documents import chunks_to_document_blocks
 from generation.prompts import (
     CLAIM_EXTRACTION_PROMPT,
     CLAIM_VERIFICATION_PROMPT,
+    CONFLICT_DETECTION_PROMPT,
     RESEARCH_SYSTEM_PROMPT,
     build_research_prompt,
 )
@@ -89,6 +90,34 @@ _VERDICT_SCHEMA: dict[str, Any] = {
             "reasoning": {"type": "string"},
         },
         "required": ["status", "reasoning"],
+        "additionalProperties": False,
+    },
+}
+
+
+_CONFLICT_SCHEMA: dict[str, Any] = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "conflicts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "topic": {"type": "string"},
+                        "source_a_index": {"type": "integer"},
+                        "position_a": {"type": "string"},
+                        "source_b_index": {"type": "integer"},
+                        "position_b": {"type": "string"},
+                    },
+                    "required": ["topic", "source_a_index", "position_a",
+                                 "source_b_index", "position_b"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["conflicts"],
         "additionalProperties": False,
     },
 }
@@ -260,3 +289,23 @@ class ClaudeClient:
             max_tokens=1024,
         )
         return data.get("status", "unsupported"), data.get("reasoning", "")
+
+    def detect_conflicts(self, question: str, chunks: list[ScoredChunk]) -> list[dict]:
+        """Find contradictions between sources. One call, not one per pair.
+
+        The model reports only what each source says. It is deliberately NOT
+        asked which source is more authoritative - that is decided in code from
+        the trust tier.
+        """
+        if len(chunks) < 2:
+            return []
+        sources = "\n\n".join(
+            f"[{i}] ({c.chunk.metadata.domain}) {c.chunk.text}"
+            for i, c in enumerate(chunks)
+        )
+        data = self._structured(
+            CONFLICT_DETECTION_PROMPT.format(question=question, sources=sources),
+            _CONFLICT_SCHEMA,
+            max_tokens=2048,
+        )
+        return data.get("conflicts", [])

@@ -38,7 +38,7 @@ pip install -r requirements.txt
 cp .env.example .env        # add ANTHROPIC_API_KEY (or use `ant auth login`)
 
 # Everything below runs offline, with no credentials and no cost:
-pytest                                   # 123 tests (+9 pgvector integration)
+pytest                                   # 134 tests (+9 pgvector integration)
 python scripts/evaluate.py --dry-run     # full pipeline, scripted model, $0
 
 # With credentials:
@@ -202,7 +202,7 @@ real figures.
 ## Testing
 
 ```bash
-pytest                    # 123 tests, offline, no credentials, no cost
+pytest                    # 134 tests, offline, no credentials, no cost
 docker compose up -d && pytest   # +9 pgvector integration tests
 pytest tests/test_citations.py -v
 ```
@@ -219,6 +219,7 @@ pytest tests/test_citations.py -v
 | `test_evaluation.py` | The scorer punishes both answer-everything and refuse-everything |
 | `test_audit_regressions.py` | **Every defect found in the audit** — each failed before its fix |
 | `test_pgvector_integration.py` | The production store: schema, both arms, tier filter, metadata round-trip, idempotency |
+| `test_conflicts.py` | **Model detects contradiction; code decides authority** — tier ranking, equal-tier neutrality, malformed reports discarded |
 
 Tests script the model into misbehaving and assert the system catches it. None
 rely on the model being well-behaved.
@@ -292,10 +293,10 @@ research-assistant/
 ├── ingestion/      loaders → cleaning → chunking → pipeline
 ├── retrieval/      embeddings, stores (in-memory + pgvector), hybrid search
 ├── generation/     prompts, document blocks, Claude client
-├── citations/      validator (binding) + verifier (claims)
+├── citations/      validator (binding) · verifier (claims) · conflicts (disagreement)
 ├── evaluation/     dataset, runner, extractive stand-in model
 ├── config/         settings, source trust policy
-├── tests/          123 tests, all offline (+9 pgvector integration)
+├── tests/          134 tests, all offline (+9 pgvector integration)
 ├── scripts/        ingest.py, evaluate.py, serve.sh
 ├── assistant.py    the orchestrator — the gates live here
 ├── schemas.py      Pydantic models used at every boundary
@@ -317,12 +318,15 @@ Two critical defects were found and fixed, plus a third the fix exposed:
 | 🔴 `min_relevance_score` compared **normalised** scores, so near-irrelevant chunks reached the model | Absolute floor applied before normalising, with a *relative* lexical escape so exact identifiers survive |
 | 🟠 `_diversify` **backfilled past the per-document cap** — one long document could still monopolise the context | Cap is now hard; returning fewer chunks beats padding with the same source |
 | 🟠 `PgVectorStore` had **zero test coverage** and had diverged from `InMemoryStore` | 9 integration tests; similarity floor restored for parity |
+| 🟠 `conflicts` was **never populated** — schema, UI and eval implied a feature no code path filled | Implemented in `citations/conflicts.py`; 11 tests |
 
 ⚠️ **The third was found by the fix, not by the audit.** Its test previously
 passed by accident. Every finding now has a regression test in
 `tests/test_audit_regressions.py`.
 
-**Still open** — the audit's remaining findings are unresolved and listed below.
+**Still open:** prompt-injection resistance and the document-block `context` key
+are both unverified, because no API key has been available. Both need one live
+call.
 
 ---
 
@@ -333,10 +337,11 @@ Stated plainly, because a system about honest evidence should be honest about it
 - **Token counts during chunking are approximate** (~3.5 chars/token). Boundaries
   don't need exactness; the context budget check does, and that uses the API's
   own counter when credentials are available.
-- **Conflict detection is prompt-driven.** The `SourceConflict` schema and the
-  prompt rule exist, but conflicts are surfaced by the model rather than detected
-  independently in code. Code-level contradiction detection across sources is the
-  clearest next improvement.
+- **Conflict detection compares only retrieved sources.** A dissenting source
+  scoring below the relevance floor is filtered out before detection runs, so a
+  conflict with marginally-relevant evidence goes unreported. Widening the
+  candidate set for detection alone was rejected — surfacing a conflict against
+  evidence too weak to have been used would mislead more than it informs.
 - **Claim verification costs an extra call per claim.** Accuracy was prioritised
   over latency; batching is the obvious optimisation.
 - **The in-memory store is not persistent.** Use `RA_STORE=pgvector` for anything
