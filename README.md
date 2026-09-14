@@ -38,7 +38,7 @@ pip install -r requirements.txt
 cp .env.example .env        # add ANTHROPIC_API_KEY (or use `ant auth login`)
 
 # Everything below runs offline, with no credentials and no cost:
-pytest                                   # 116 tests
+pytest                                   # 123 tests (+9 pgvector integration)
 python scripts/evaluate.py --dry-run     # full pipeline, scripted model, $0
 
 # With credentials:
@@ -202,7 +202,8 @@ real figures.
 ## Testing
 
 ```bash
-pytest                    # 116 tests, offline, no credentials, no cost
+pytest                    # 123 tests, offline, no credentials, no cost
+docker compose up -d && pytest   # +9 pgvector integration tests
 pytest tests/test_citations.py -v
 ```
 
@@ -216,9 +217,14 @@ pytest tests/test_citations.py -v
 | `test_api.py` | Endpoints, validation, rate limiting, evidence inspector |
 | `test_security.py` | Secret redaction; **prompt injection cannot alter trust tier**; no SSRF surface |
 | `test_evaluation.py` | The scorer punishes both answer-everything and refuse-everything |
+| `test_audit_regressions.py` | **Every defect found in the audit** — each failed before its fix |
+| `test_pgvector_integration.py` | The production store: schema, both arms, tier filter, metadata round-trip, idempotency |
 
 Tests script the model into misbehaving and assert the system catches it. None
 rely on the model being well-behaved.
+
+⚠️ **116 of these existed before the audit and all passed while four real defects
+were live.** A passing suite is evidence only of what it thought to check.
 
 ---
 
@@ -233,6 +239,8 @@ that change behaviour most:
 | `RA_MIN_EVIDENCE_SCORE` | `0.30` | Absolute relevance required before the model is called at all |
 | `RA_TOP_K` | `8` | Chunks passed to the model |
 | `RA_MAX_PER_DOC` | `3` | Stops one document monopolising the context |
+| `RA_MIN_ABSOLUTE_RELEVANCE` | `0.15` | **Absolute** floor — a chunk this distant is not evidence, however it ranks |
+| `RA_MIN_LEXICAL_RATIO` | `0.25` | How strong a lexical hit must be, relative to the query's best, to bypass the floor |
 | `RA_WEB_RESEARCH` | `false` | Web research, allowlist-gated |
 
 **Raise the first two to make the assistant more reluctant to answer.**
@@ -287,12 +295,34 @@ research-assistant/
 ├── citations/      validator (binding) + verifier (claims)
 ├── evaluation/     dataset, runner, extractive stand-in model
 ├── config/         settings, source trust policy
-├── tests/          116 tests, all offline
+├── tests/          123 tests, all offline (+9 pgvector integration)
 ├── scripts/        ingest.py, evaluate.py, serve.sh
 ├── assistant.py    the orchestrator — the gates live here
 ├── schemas.py      Pydantic models used at every boundary
 └── web_research.py allowlist-gated server-side web tools
 ```
+
+---
+
+## Audit
+
+The project was audited against its own requirements on 2026-09-14:
+**[RAG-AUDIT-REPORT.md](RAG-AUDIT-REPORT.md)**.
+
+Two critical defects were found and fixed, plus a third the fix exposed:
+
+| Finding | Fix |
+|---|---|
+| 🔴 A Tier-4 source could be the **sole citation** with no caveat — caveats were computed from *retrieved* chunks, not *cited* ones | Caveats now derive from citations; a Tier-4-only answer is **withheld** |
+| 🔴 `min_relevance_score` compared **normalised** scores, so near-irrelevant chunks reached the model | Absolute floor applied before normalising, with a *relative* lexical escape so exact identifiers survive |
+| 🟠 `_diversify` **backfilled past the per-document cap** — one long document could still monopolise the context | Cap is now hard; returning fewer chunks beats padding with the same source |
+| 🟠 `PgVectorStore` had **zero test coverage** and had diverged from `InMemoryStore` | 9 integration tests; similarity floor restored for parity |
+
+⚠️ **The third was found by the fix, not by the audit.** Its test previously
+passed by accident. Every finding now has a regression test in
+`tests/test_audit_regressions.py`.
+
+**Still open** — the audit's remaining findings are unresolved and listed below.
 
 ---
 
@@ -313,3 +343,12 @@ Stated plainly, because a system about honest evidence should be honest about it
   real.
 - **`HashEmbedder` is lexical, not semantic.** It exists to make tests
   deterministic and free. Never use it in production.
+- ⚠️ **Nothing has been verified against a real model.** No `ANTHROPIC_API_KEY`
+  was available during development or audit, so every figure here comes from a
+  scripted or extractive stand-in. For a project about hallucination prevention,
+  that is a material gap — the structural defences are proven, the model's
+  behaviour under adversarial documents is not.
+- **Rate limiting is in-process and unbounded.** Per-client keys are never
+  pruned. Fine for a single instance; wrong for production.
+- **`get_settings()` is cached** — environment changes after first access are
+  silently ignored.

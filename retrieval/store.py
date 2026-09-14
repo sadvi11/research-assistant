@@ -251,15 +251,21 @@ class PgVectorStore:
 
     def dense_search(self, vector, limit, *, max_tier=None):
         literal = "[" + ",".join(f"{v:.8f}" for v in vector) + "]"
-        tier_clause = "WHERE tier <= %s" if max_tier is not None else ""
-        params: list = [literal]
+        # ORDER BY ... LIMIT n always returns n rows, so without an explicit
+        # floor this store returns zero-similarity chunks where InMemoryStore
+        # drops them. The two backends must agree; a divergence means the
+        # tested behaviour is not the deployed behaviour.
+        conditions = ["1 - (embedding <=> %s::vector) > 0"]
+        params: list = [literal, literal]
         if max_tier is not None:
+            conditions.append("tier <= %s")
             params.append(int(max_tier))
         params.extend([literal, limit])
+        where = " AND ".join(conditions)
         with self._connect().cursor() as cur:
             cur.execute(
                 f"""SELECT {self._SELECT}, 1 - (embedding <=> %s::vector) AS score
-                    FROM chunks {tier_clause}
+                    FROM chunks WHERE {where}
                     ORDER BY embedding <=> %s::vector LIMIT %s""",
                 params,
             )

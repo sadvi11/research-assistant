@@ -126,8 +126,11 @@ class ResearchAssistant:
                 question, chunks, subquestions=subquestions or None,
                 web_tools=web_tools or None,
             )
-        except (GenerationError, ValueError) as exc:
-            logger.error("generation failed", extra={"request_id": request_id, "error": str(exc)})
+        except Exception as exc:
+            # Deliberately broad: the orchestrator is a boundary. Any escaping
+            # exception becomes a caller's unhandled crash rather than a safe
+            # ERROR status, so nothing is allowed through.
+            logger.exception("generation failed", extra={"request_id": request_id})
             return ResearchAnswer(
                 question=question, status=AnswerStatus.ERROR,
                 answer=f"The research request could not be completed: {exc}",
@@ -182,7 +185,18 @@ class ResearchAssistant:
                 subquestions=subquestions, claims=verification.claims,
             )
 
-        notes.extend(self._uncertainty_notes(chunks, verification))
+        # A Tier-4-only answer is not evidence-grounded research, however well
+        # its citations verify. Citation authenticity and source trust are
+        # different properties and must not be conflated.
+        trust_gate = self._trust_gate(validation.valid)
+        if not trust_gate.passed:
+            notes.append(trust_gate.note or "")
+            return self._insufficient(
+                question, evidence, notes, request_id, started,
+                subquestions=subquestions, claims=verification.claims,
+            )
+
+        notes.extend(self._uncertainty_notes(validation.valid, chunks, verification))
 
         return ResearchAnswer(
             question=question,
@@ -282,6 +296,25 @@ class ResearchAssistant:
             )
         return _Gate(True)
 
+    def _trust_gate(self, citations: list[Citation]) -> _Gate:
+        """Refuse when every cited source is unvetted.
+
+        The citation validator proves a passage really came from the chunk it
+        names. It says nothing about whether that source deserved to be trusted.
+        This gate supplies the missing half.
+        """
+        if not citations:
+            return _Gate(True)  # handled separately by the no-citation path
+        if all(c.tier is SourceTier.UNVETTED for c in citations):
+            domains = sorted({c.domain for c in citations})
+            return _Gate(
+                False,
+                "Every supporting source is unvetted "
+                f"({', '.join(domains)}), so the answer was withheld. Unvetted "
+                "sources are never authoritative on their own.",
+            )
+        return _Gate(True)
+
     def _claim_gate(self, verification: VerificationReport) -> _Gate:
         if verification.contradicted:
             return _Gate(
@@ -317,16 +350,34 @@ class ResearchAssistant:
         )
 
     def _uncertainty_notes(
-        self, chunks: list[ScoredChunk], verification: VerificationReport
+        self,
+        citations: list[Citation],
+        chunks: list[ScoredChunk],
+        verification: VerificationReport,
     ) -> list[str]:
+        """Caveats describe the sources the answer actually RESTS ON.
+
+        Computing these from retrieved chunks was a real defect: an answer could
+        cite only a content farm while a Tier 1 document sat unused in the
+        retrieved set, and the "no official source" warning would not fire.
+        """
         notes: list[str] = []
-        domains = {c.chunk.metadata.domain for c in chunks}
-        if len(domains) < self.settings.prefer_independent_sources:
+        cited_domains = {c.domain for c in citations}
+        cited_tiers = {c.tier for c in citations}
+
+        if citations and len(cited_domains) < self.settings.prefer_independent_sources:
             notes.append(
-                f"This answer rests on a single source domain ({next(iter(domains), 'unknown')}). "
-                "Corroboration from an independent source would strengthen it."
+                f"This answer rests on a single source domain "
+                f"({next(iter(cited_domains), 'unknown')}). Corroboration from an "
+                "independent source would strengthen it."
             )
-        if not any(c.chunk.tier is SourceTier.OFFICIAL for c in chunks):
+        if citations and SourceTier.OFFICIAL not in cited_tiers:
+            lowest = max(cited_tiers)
+            notes.append(
+                f"No Tier 1 (official/primary) source supports this answer - the most "
+                f"authoritative source cited is {lowest.label}."
+            )
+        elif not citations and not any(c.chunk.tier is SourceTier.OFFICIAL for c in chunks):
             notes.append("No Tier 1 (official/primary) source was available for this question.")
         if verification.unsupported:
             notes.append(

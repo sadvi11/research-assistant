@@ -139,6 +139,30 @@ class HybridRetriever:
         if not scored:
             return []
 
+        # Drop absolutely-irrelevant chunks BEFORE normalising. Normalisation is
+        # for ordering and display; it must never decide inclusion, because the
+        # best hit for an off-topic query also normalises to ~1.0.
+        #
+        # The exception is a STRONG lexical hit. Dense similarity systematically
+        # underrates exact identifiers - an error code has no semantic
+        # neighbourhood - so a chunk matching one is real evidence at low
+        # cosine. But "appeared in the lexical list at all" is too weak a test:
+        # common phrases match too. The bar is a chunk's score relative to the
+        # best lexical score for the same query, which is corpus-independent in
+        # a way any fixed BM25 threshold would not be.
+        floor = self.settings.min_absolute_relevance
+        best_lexical = max((s.lexical_score or 0.0) for s in scored) or 0.0
+        lexical_bar = best_lexical * self.settings.min_lexical_ratio
+
+        def keeps(s: ScoredChunk) -> bool:
+            if s.absolute_relevance >= floor:
+                return True
+            return s.lexical_score is not None and s.lexical_score >= lexical_bar > 0.0
+
+        scored = [s for s in scored if keeps(s)]
+        if not scored:
+            return []
+
         best = max(s.score for s in scored) or 1.0
         reranked: list[ScoredChunk] = []
         for item in scored:
@@ -174,19 +198,19 @@ class HybridRetriever:
         """
         per_doc: defaultdict[str, int] = defaultdict(int)
         kept: list[ScoredChunk] = []
-        overflow: list[ScoredChunk] = []
 
         for item in scored:
             doc = item.chunk.document_id
-            if per_doc[doc] < self.settings.max_chunks_per_document:
-                per_doc[doc] += 1
-                kept.append(item)
-            else:
-                overflow.append(item)
+            if per_doc[doc] >= self.settings.max_chunks_per_document:
+                continue
+            per_doc[doc] += 1
+            kept.append(item)
             if len(kept) >= limit:
                 break
 
-        # Backfill only if diversification left us short of the budget.
-        if len(kept) < limit:
-            kept.extend(overflow[: limit - len(kept)])
+        # Deliberately NO backfill from over-cap documents. Returning fewer
+        # chunks is more honest than padding the context with more of the same
+        # source: extra passages from one document are not extra evidence, and
+        # filling the budget that way manufactures the appearance of
+        # corroboration where none exists.
         return kept[:limit]

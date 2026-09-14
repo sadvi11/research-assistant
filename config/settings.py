@@ -48,7 +48,21 @@ class Settings:
     retrieve_candidates: int = field(default_factory=lambda: _env_int("RA_CANDIDATES", 40))
     final_context_chunks: int = field(default_factory=lambda: _env_int("RA_TOP_K", 8))
     max_chunks_per_document: int = field(default_factory=lambda: _env_int("RA_MAX_PER_DOC", 3))
+    # Relative filter: how far below the best hit a chunk may fall.
     min_relevance_score: float = field(default_factory=lambda: _env_float("RA_MIN_RELEVANCE", 0.25))
+    # Absolute floor: a chunk this semantically distant is not evidence, however
+    # it ranks relative to the rest. Without this, the top hit for ANY query
+    # normalises to ~1.0 and near-irrelevant chunks reach the model.
+    min_absolute_relevance: float = field(
+        default_factory=lambda: _env_float("RA_MIN_ABSOLUTE_RELEVANCE", 0.15)
+    )
+    # A chunk below the absolute floor is kept only if it is a STRONG lexical
+    # hit - at least this fraction of the best lexical score for the same query.
+    # Expressed as a ratio because BM25 scores are unbounded and scale with
+    # corpus size and term rarity, so any fixed threshold would be brittle.
+    min_lexical_ratio: float = field(
+        default_factory=lambda: _env_float("RA_MIN_LEXICAL_RATIO", 0.25)
+    )
     rrf_k: int = field(default_factory=lambda: _env_int("RA_RRF_K", 60))
 
     # --- Grounding thresholds ---------------------------------------------

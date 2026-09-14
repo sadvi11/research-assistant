@@ -58,6 +58,34 @@ def test_no_single_document_monopolises_the_context(store, embedder, settings):
     assert max(per_doc.values()) <= settings.max_chunks_per_document
 
 
+def test_cap_is_hard_even_when_it_means_returning_fewer_chunks(store, embedder, settings):
+    """Regression: the cap used to be a preference, not a limit.
+
+    `_diversify` backfilled from over-cap documents to fill the budget, so a
+    single long document could still supply more slots than the cap allows.
+    Returning fewer chunks is correct - extra passages from one source are not
+    extra evidence, and padding manufactures the look of corroboration.
+    """
+    from ingestion.pipeline import IngestionPipeline
+    from retrieval.hybrid import HybridRetriever
+    from retrieval.store import InMemoryStore
+
+    solo = InMemoryStore()
+    long_doc = "# Long\n\n" + "\n\n".join(
+        f"Paragraph {i} discusses the kubernetes control plane in detail." for i in range(30)
+    )
+    IngestionPipeline(store=solo, embedder=embedder, settings=settings).ingest_text(
+        long_doc, url="https://kubernetes.io/docs/long.html", suffix=".md"
+    )
+    results = HybridRetriever(solo, embedder, settings=settings).retrieve(
+        "kubernetes control plane", limit=6
+    )
+    assert len(results) <= settings.max_chunks_per_document, (
+        f"one document supplied {len(results)} chunks despite a cap of "
+        f"{settings.max_chunks_per_document}"
+    )
+
+
 def test_empty_query_returns_nothing(retriever):
     assert retriever.retrieve("") == []
     assert retriever.retrieve("   ") == []
