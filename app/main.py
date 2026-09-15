@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.deps import get_assistant, get_ingestion, get_store_and_embedder
+from config.env import load_env
 from app.logging_config import configure_logging
 from assistant import InvalidQuestionError, ResearchAssistant
 from config.settings import get_settings
@@ -25,6 +26,9 @@ from ingestion.pipeline import IngestionPipeline
 from schemas import ResearchAnswer
 
 logger = logging.getLogger(__name__)
+
+# Before anything reads settings.
+load_env()
 configure_logging()
 
 app = FastAPI(

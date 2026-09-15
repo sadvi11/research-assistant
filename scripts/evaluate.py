@@ -17,6 +17,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.logging_config import configure_logging  # noqa: E402
+from config.env import load_env  # noqa: E402
+
+load_env()
 from assistant import ResearchAssistant  # noqa: E402
 from citations.validator import CitationValidator  # noqa: E402
 from citations.verifier import ClaimVerifier  # noqa: E402

@@ -7,7 +7,8 @@ services:
       POSTGRES_PASSWORD: research
       POSTGRES_DB: research
     ports:
-      - "5432:5432"
+      # Loopback only: the password is a public dev default, so never expose it to the network.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

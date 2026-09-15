@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.deps import get_ingestion  # noqa: E402
 from app.logging_config import configure_logging  # noqa: E402
+from config.env import load_env  # noqa: E402
+
+load_env()
 from config.sources import SourceTier, get_trust_policy  # noqa: E402
 
 
