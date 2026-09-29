@@ -1,5 +1,7 @@
 # Research Assistant
 
+[![CI](https://github.com/sadvi11/research-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/sadvi11/research-assistant/actions/workflows/ci.yml)
+
 Evidence-grounded research over trusted sources. The system answers **only** from
 retrieved documents, verifies every citation against its own stored copy of the
 source, and **refuses to answer** when the evidence does not support one.
@@ -348,11 +350,12 @@ Stated plainly, because a system about honest evidence should be honest about it
   real.
 - **`HashEmbedder` is lexical, not semantic.** It exists to make tests
   deterministic and free. Never use it in production.
-- ⚠️ **Nothing has been verified against a real model.** No `ANTHROPIC_API_KEY`
-  was available during development or audit, so every figure here comes from a
-  scripted or extractive stand-in. For a project about hallucination prevention,
-  that is a material gap — the structural defences are proven, the model's
-  behaviour under adversarial documents is not.
+- ⚠️ **Only partly verified against a real model.** On 2026-09-15 the six
+  hallucination-bait cases were run live against Claude Opus 5: 4 of 6 passed,
+  20 cents, and both "failures" answered with every claim supported by the
+  evidence, which is the scoring question in the next bullet. Every other
+  figure on this page still comes from the scripted or extractive stand-in,
+  and the remaining 18 cases have not been run against a real model.
 - **Rate limiting is in-process and unbounded.** Per-client keys are never
   pruned. Fine for a single instance; wrong for production.
 - **`get_settings()` is cached** — environment changes after first access are
