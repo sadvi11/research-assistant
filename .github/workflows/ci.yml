@@ -35,8 +35,27 @@ jobs:
       - name: Tests
         run: python -m pytest -q
 
-      - name: The whole pipeline runs offline, with no credentials and no cost
-        run: python scripts/evaluate.py --dry-run
+      - name: The offline evaluation must not regress below its baseline
+        # evaluate.py exits 1 whenever any case fails, and four documented cases
+        # do: the extractive stand-in quotes one sentence (M1, M2) and cannot
+        # detect a false premise (H1, H3). README records that. So the exit code
+        # is not the signal - the score is. This fails only if it gets worse.
+        run: |
+          set +e
+          python scripts/evaluate.py --dry-run | tee eval.txt
+          set -e
+          python - <<'PY'
+          import re, sys
+          BASELINE = 20
+          report = open("eval.txt").read()
+          m = re.search(r"Cases:\s+(\d+)\s+Passed:\s+(\d+)", report)
+          if not m:
+              sys.exit("::error::could not read the evaluation summary")
+          cases, passed = int(m.group(1)), int(m.group(2))
+          print(f"{passed} of {cases} passed; baseline is {BASELINE}")
+          if passed < BASELINE:
+              sys.exit(f"::error::evaluation regressed: {passed}/{cases}, below the baseline of {BASELINE}")
+          PY
 
   pgvector:
     name: pgvector integration
